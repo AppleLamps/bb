@@ -101,6 +101,13 @@ WSL2 runs the Linux stack entirely inside the distro:
   `explorer.exe`.
 - Provider runtimes are supported only where the provider itself supports
   native Windows.
+- The bundled `bb` CLI is an extensionless `#!/usr/bin/env node` script.
+  Windows cannot spawn it directly, so the packaged `bb` entrypoint launches it
+  through `cross-spawn`, which reads the shebang and re-targets at node.
+- Known gap: `BB_CLI`, injected into thread environments, still points at that
+  extensionless file. An agent invoking it directly from PowerShell or CMD
+  fails with ENOENT. Agents on native Windows should invoke it as
+  `node $env:BB_CLI` until the daemon bundle ships a `bb.cmd` shim.
 
 ### Maintainer-only or best-effort surfaces
 

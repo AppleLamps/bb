@@ -80,6 +80,7 @@
   },
   "devDependencies": {
     "@bb/config": "workspace:*",
+    "@bb/process-utils": "workspace:*",
     "@bb/sdk": "workspace:*",
     "@bb/tsconfig": "workspace:*",
     "@types/node": "^22.0.0",

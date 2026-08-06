@@ -53,8 +53,12 @@ function resolveLocal(specifier, importerRel) {
   if (specifier.startsWith("@/")) {
     base = specifier.slice(2);
   } else if (specifier.startsWith(".")) {
-    base = path.normalize(
-      path.join(path.dirname(importerRel), specifier),
+    // path.posix, not path: relPath is a logical app-src-relative identifier
+    // that classify() matches with "components/ui/" prefixes and that becomes
+    // the registry target. Native path.join would make it backslash-separated
+    // on Windows, so the same file would resolve to two distinct keys.
+    base = path.posix.normalize(
+      path.posix.join(path.posix.dirname(importerRel), specifier),
     );
   } else {
     return null;

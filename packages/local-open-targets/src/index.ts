@@ -277,6 +277,12 @@ async function getDefaultOpenExecutable(
       : null;
   }
 
+  if (runtime.platform === "win32") {
+    return (await isExecutableAvailable("explorer.exe", runtime))
+      ? "explorer.exe"
+      : null;
+  }
+
   return null;
 }
 
@@ -295,12 +301,21 @@ async function getFileManagerExecutable(
       : null;
   }
 
+  if (runtime.platform === "win32") {
+    return (await isExecutableAvailable("explorer.exe", runtime))
+      ? "explorer.exe"
+      : null;
+  }
+
   return null;
 }
 
 async function getTerminalExecutable(
   runtime: WorkspaceOpenTargetRuntime,
 ): Promise<string | null> {
+  // Windows is absent on purpose: the terminal opener hands the shell a POSIX
+  // script (see buildLocalTerminalShellArgs), which no Windows console runs.
+  // Advertising the target here would surface an opener that always fails.
   const candidates =
     runtime.platform === "linux"
       ? ["x-terminal-emulator", "gnome-terminal", "konsole", "xterm"]
@@ -476,13 +491,28 @@ async function defaultExecFile(
   };
 }
 
+/**
+ * explorer.exe exits 1 even when it successfully opens the target, so a
+ * non-zero exit from it says nothing about whether the open worked. Treating
+ * it as a failure would report an error for every successful Windows open.
+ */
+function isExitCodeMeaningless(file: string): boolean {
+  return file.toLowerCase().endsWith("explorer.exe");
+}
+
 async function execInvocation(
   invocation: ExecFileInvocation,
   runtime: WorkspaceOpenTargetRuntime,
 ): Promise<void> {
-  await runtime.execFile(invocation.file, invocation.args, {
-    env: invocation.env,
-  });
+  try {
+    await runtime.execFile(invocation.file, invocation.args, {
+      env: invocation.env,
+    });
+  } catch (error) {
+    if (!isExitCodeMeaningless(invocation.file)) {
+      throw error;
+    }
+  }
 }
 
 function createDefaultRuntime(): WorkspaceOpenTargetRuntime {

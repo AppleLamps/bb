@@ -131,6 +131,15 @@ We are explicitly not adopting:
 - generic filesystem helper libraries
   - `fs/promises` is sufficient
 
+### Package platform gating
+
+The `bb-app` npm package declares `os: ["darwin", "linux", "win32"]`. npm
+enforces that field at install time, so a missing entry fails `npx bb-app` with
+`EBADPLATFORM` before any bb code runs, no matter how portable that code is.
+
+The desktop Electron package stays `os: ["darwin"]`; desktop builds are still
+macOS-only.
+
 ### Native npm dependencies
 
 The npm package keeps native add-ons as runtime dependencies instead of bundling

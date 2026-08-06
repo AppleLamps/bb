@@ -38,6 +38,35 @@ credentials. If you use multiple providers, you can mix and match per task.
 
 - macOS
 - Linux
+- Windows (native, or via Ubuntu on WSL2)
+
+<details>
+<summary>Native Windows</summary>
+
+Run the same commands from PowerShell or CMD:
+
+```powershell
+npx bb-app@latest
+```
+
+Then open `http://localhost:38886`.
+
+Register projects with native paths — `C:\Users\me\repo`, `\\server\share\repo`,
+and `\\?\C:\...` are all accepted and stored in a single canonical form
+(uppercase drive letter, backslashes, no trailing separator). bb data lives in
+`%USERPROFILE%\.bb`.
+
+Known caveats:
+
+- The repo-level setup hook is `.bb-env-setup.ps1`, run through PowerShell. A
+  `.bb-env-setup.sh` is used as a fallback when `bash` is on PATH (Git for
+  Windows installs one).
+- Terminals run through ConPTY and default to PowerShell. Set `BB_TERMINAL_SHELL`
+  to override.
+- "Open in terminal" is unavailable; "open in file manager" uses Explorer.
+- Provider CLIs must themselves support native Windows.
+
+</details>
 
 <details>
 <summary>Windows via Ubuntu on WSL2</summary>
@@ -46,10 +75,10 @@ Run all `bb` commands inside WSL2, install Node.js, Git, and your provider CLIs
 inside that WSL2 distro, and use Linux-style paths such as `/home/me/repo` or
 `/mnt/c/Users/me/repo`.
 
-Native Windows PowerShell, CMD, drive-letter paths, and UNC paths are not
-supported product paths. Repos inside the WSL filesystem are recommended;
-`/mnt/c/...` is intentionally supported so you can keep an existing Windows
-checkout, but it is slower and less reliable for file watching.
+Repos inside the WSL filesystem are recommended; `/mnt/c/...` is intentionally
+supported so you can keep an existing Windows checkout, but it is slower and
+less reliable for file watching. Do not mix the two: a machine enrolled from
+WSL2 addresses projects by their WSL paths, not their drive-letter paths.
 
 </details>
 

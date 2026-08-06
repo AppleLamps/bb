@@ -6,6 +6,7 @@
 
 - macOS persistent host
 - Linux persistent host
+- Windows persistent host (native win32)
 - Windows via Ubuntu on WSL2
 
 Minimum runtime: Node.js 22.19. The floor comes from Pi, whose packages declare
@@ -22,14 +23,24 @@ floor only, so a release line we have not tested yet still installs rather than
 failing hard on the day it ships. The `bb-app` npm `engines` field lists the
 tested lines, which npm surfaces as a warning rather than an install failure.
 
-Windows support means the Linux stack runs entirely inside WSL2:
+Windows has two supported shapes. Pick one per machine and stay in it — a
+machine enrolled from WSL2 addresses projects by their WSL paths, and one
+enrolled natively addresses them by drive-letter paths.
+
+Native Windows runs the stack directly on win32:
+
+- `bb` processes run in PowerShell or CMD; WSL2 is not involved
+- drive-letter (`C:\Users\me\repo`), UNC (`\\server\share\repo`), and
+  extended-length (`\\?\C:\...`) paths are supported product input
+- the data dir is `%USERPROFILE%\.bb`
+- the setup hook is `.bb-env-setup.ps1`, with `.bb-env-setup.sh` as a fallback
+
+WSL2 runs the Linux stack entirely inside the distro:
 
 - all `bb` processes run inside the same Ubuntu WSL2 distro
 - Node.js, Git, provider CLIs, and pnpm for source-development flows are
   installed inside WSL2
 - local project paths use Linux-style absolute paths from inside WSL2
-- native Windows PowerShell, CMD, drive-letter paths, and UNC paths are not
-  supported product paths
 
 ## Support Boundaries
 
@@ -73,14 +84,30 @@ Windows support means the Linux stack runs entirely inside WSL2:
   the WSL filesystem, but they are a tradeoff:
   slower filesystem I/O and weaker file-watching behavior than the WSL
   filesystem.
-- Native Windows drive-letter and UNC paths are rejected at the app/server
-  boundary so unsupported input fails clearly.
+
+### Native-Windows-specific expectations
+
+- Paths are normalized to one canonical form at the app/server boundary:
+  uppercase drive letter, backslash separators, no trailing separator, and no
+  `\\?\` extended-length prefix. `C:\repo`, `c:/repo/`, and `\\?\C:\repo` all
+  store as `C:\repo`.
+- Drive-relative paths such as `C:Users\me\repo` are rejected. They resolve
+  against the drive's per-process current directory, which the host cannot
+  reproduce.
+- Terminals run through node-pty's ConPTY backend. The shell is
+  `BB_TERMINAL_SHELL`, then `COMSPEC`, then PowerShell, then `cmd.exe`.
+- The "open in terminal" workspace target is unavailable: its opener passes the
+  shell a POSIX script. "Open in file manager" and "default app" use
+  `explorer.exe`.
+- Provider runtimes are supported only where the provider itself supports
+  native Windows.
 
 ### Maintainer-only or best-effort surfaces
 
 - workspace-owned QA helpers under [`tests/qa/`](../tests/qa/)
 - dev restart internals that are not part of the shipped product path
-- native Windows PowerShell, CMD, and host-daemon runtime flows
+- source-checkout development flows on native Windows (`pnpm dev`,
+  `scripts/bb-dev-app`); the packaged `npx bb-app` path is the supported one
 
 ## Dependency Policy
 
@@ -109,7 +136,13 @@ We are explicitly not adopting:
 The npm package keeps native add-ons as runtime dependencies instead of bundling
 one platform-specific `.node` binary into bb's JavaScript artifacts. This lets
 npm install the correct native artifacts on the target machine for packages such
-as `better-sqlite3` and `@parcel/watcher`.
+as `better-sqlite3` and `@parcel/watcher`. Both ship win32-x64 and win32-arm64
+prebuilds for the tested Node lines.
+
+`node scripts/ensure-native-modules.mjs` checks each native add-on by loading it
+in a fresh process, reinstalls its prebuild when the load fails for an ABI or
+bindings reason, and rebuilds from source with node-gyp when no usable prebuild
+exists. It runs automatically from `pnpm dev` and can be run directly.
 
 Known failure modes remain the normal native-addon ones:
 
@@ -125,8 +158,13 @@ rebuild the native dependency, for example `npm rebuild better-sqlite3`.
 
 ## Setup Hook Policy
 
-- The supported setup hook is POSIX `.bb-env-setup.sh`.
-- The same shell-based hook contract is used across macOS, Linux, and WSL2.
+- The supported setup hook is POSIX `.bb-env-setup.sh` on macOS, Linux, and
+  WSL2, and `.bb-env-setup.ps1` on native Windows.
+- Native Windows prefers `.bb-env-setup.ps1` and falls back to
+  `.bb-env-setup.sh` through `bash` when a repo ships only that one. A repo
+  targeting both can commit both files.
+- The hook runs with cwd set to the new workspace. PowerShell hooks run as
+  `powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File`.
 - No parallel `.bb-env-setup.ts` product-path mechanism is supported.
 - The `.worktreeinclude` copy step runs no shell. It works on every platform,
   including native Windows.
@@ -136,8 +174,9 @@ rebuild the native dependency, for example `npm rebuild better-sqlite3`.
 - The repository enforces LF checkout for supported text files via
   [.gitattributes](../.gitattributes).
 - Supported Linux and WSL2 flows must work with those repository rules applied.
-- Native Windows checkouts are outside the support contract unless we later
-  choose to support a native Windows product path.
+- Native Windows product flows run from the published npm package, which is not
+  affected by repository checkout line endings. Source checkouts on native
+  Windows should set `core.autocrlf=false` so the LF rules survive.
 
 ## CI And Validation
 
@@ -149,11 +188,15 @@ rebuild the native dependency, for example `npm rebuild better-sqlite3`.
   22, validating the packed npm artifact through `npx --package`.
 - Pushes to `main` and manually dispatched CI runs also run the `bb-app` tarball
   smoke on Ubuntu and macOS with Node.js 24 and 26.
+- Pull requests run `Windows Smoke (windows-latest, Node 22.x)`: native-module
+  load, full typecheck, the platform-agnostic test packages, and the `bb-app`
+  tarball smoke, which starts the server plus host daemon and health-checks
+  both.
 - Branch protection should require `Checks (ubuntu-latest, Node 22.x)`,
   `Package Smoke (ubuntu-latest, Node 22.x)`, and
   `Package Smoke (macos-latest, Node 22.x)`. The Node.js 24 and 26 compatibility
   smoke jobs do not run on pull requests and should not be configured as
   required PR checks.
-- Native Windows CI is intentionally not required because Windows support uses
-  the Linux runtime path inside WSL2 rather than a separate native Windows
-  product path.
+- Windows smoke is deliberately not a required check yet. It is coverage for
+  native-module and path regressions, not the full Linux matrix; the server,
+  app, and integration suites still assume a POSIX host in places.

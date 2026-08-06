@@ -35,11 +35,8 @@ The recommended way to start using bb is the desktop app:
 
 **[Download the latest desktop app](https://github.com/get-bb/bb/releases/tag/desktop-latest)**
 
-The desktop build is currently macOS Apple Silicon (arm64) only. Intel Mac and
-Linux users should run bb with `npx` instead. On Windows, run bb inside
-[WSL2 (Windows Subsystem for Linux)](https://learn.microsoft.com/windows/wsl/install):
-install WSL2 first, then run the same `npx` command below from your WSL2 (Linux)
-shell. Native Windows PowerShell and CMD are not supported.
+The desktop build is currently macOS Apple Silicon (arm64) only. Intel Mac,
+Linux, and Windows users should run bb with `npx` instead.
 
 Early adopters can install
 **[bb Nightly](https://github.com/get-bb/bb/releases/tag/desktop-nightly)**
@@ -53,6 +50,19 @@ npx bb-app@latest
 ```
 
 Then open `http://localhost:38886`.
+
+#### Native Windows
+
+The same command works in PowerShell or CMD — WSL2 is not required:
+
+```powershell
+npx bb-app@latest
+```
+
+Register projects with native paths such as `C:\Users\me\repo`. Running bb
+inside [WSL2](https://learn.microsoft.com/windows/wsl/install) is still
+supported; see [docs/platform-support.md](docs/platform-support.md) for the
+caveats on each.
 
 To run the newest automated build instead:
 

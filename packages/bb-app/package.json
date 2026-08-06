@@ -82,6 +82,7 @@
     "@bb/sdk": "workspace:*",
     "@bb/tsconfig": "workspace:*",
     "@types/node": "^22.0.0",
+    "cross-spawn": "^7.0.6",
     "rimraf": "^6.1.0",
     "rollup": "^4.62.2",
     "rollup-plugin-dts": "^6.4.1",

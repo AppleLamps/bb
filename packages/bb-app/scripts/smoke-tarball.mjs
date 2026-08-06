@@ -1,4 +1,6 @@
-import { spawn } from "node:child_process";
+// cross-spawn, not node:child_process.spawn: on Windows `npm` and `npx` are
+// .cmd shims, which Node refuses to spawn without a shell.
+import spawn from "cross-spawn";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -249,6 +251,8 @@ async function packTarball() {
 async function extractTarball(tarballPath) {
   const extractDir = join(tempRoot, "extracted-package");
   await mkdir(extractDir, { recursive: true });
+  // Windows 10+ ships bsdtar as tar.exe, so this one command covers every
+  // supported host.
   await runCommand({
     args: ["-xzf", tarballPath, "-C", extractDir],
     command: "tar",

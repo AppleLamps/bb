@@ -17,12 +17,18 @@ Making your repo work with bb:
   looks for .bb-env-setup.sh inside that new workspace. If the file is absent,
   provisioning continues with no error.
 
+  On native Windows hosts the hook is .bb-env-setup.ps1, and bb falls back to
+  .bb-env-setup.sh only when bash is on PATH. Commit both to support both
+  kinds of host.
+
   The script must be tracked by git. A fresh worktree only checks out tracked
   files, so an untracked .bb-env-setup.sh in your source checkout will not be
   present and will not run.
 
   BB runs the hook as `env bash .bb-env-setup.sh` with cwd set to the new
-  workspace. POSIX shell setup scripts are not supported on Windows. The hook
+  workspace, or as
+  `powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .bb-env-setup.ps1`
+  on native Windows. The hook
   inherits the host daemon's sanitized environment: NODE_ENV and every BB_*
   variable are removed, and bb does not inject BB_PROJECT_ID, BB_ENVIRONMENT_ID,
   or BB_SOURCE_PATH.
@@ -34,8 +40,8 @@ Making your repo work with bb:
   A non-zero exit, timeout, signal, or cancellation fails provisioning and bb
   removes the new worktree. Keep optional setup steps non-fatal inside the
   script if the environment should still open. Provisioning progress reports
-  "Running .bb-env-setup.sh" and then ".bb-env-setup.sh finished",
-  ".bb-env-setup.sh failed", or ".bb-env-setup.sh cancelled".
+  "Running <hook>" and then "<hook> finished", "<hook> failed", or
+  "<hook> cancelled", naming the hook file that actually ran.
 
   New worktrees do not contain untracked files such as .env.local. To copy
   them from the source checkout, commit a .worktreeinclude file at the repo
@@ -52,7 +58,8 @@ Making your repo work with bb:
   the worktree already has. The copy runs after `git worktree add` and before
   .bb-env-setup.sh, so the setup script can read the copied files. A pattern
   that matches nothing, or a file bb cannot read, is reported in the
-  provisioning transcript and does not fail provisioning.
+  provisioning transcript and does not fail provisioning. The copy step runs no
+  shell, so it behaves identically on every platform.
 
   Large directories such as node_modules are copied file by file. Install
   dependencies in .bb-env-setup.sh instead of listing them here.

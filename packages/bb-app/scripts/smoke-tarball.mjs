@@ -186,7 +186,41 @@ async function waitForHttp({ label, processRef, url }) {
   );
 }
 
+function killWindowsProcessTree(pid) {
+  return new Promise((resolvePromise) => {
+    const killer = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], {
+      stdio: "ignore",
+    });
+    killer.on("error", () => resolvePromise());
+    killer.on("exit", () => resolvePromise());
+  });
+}
+
+/**
+ * Windows has no process groups, so killing the npx wrapper leaves the real
+ * bb-app process running with the data dir still open — which then turns the
+ * temp-root cleanup into EBUSY. taskkill /T ends the whole tree.
+ */
+async function stopWindowsManagedProcess(processRef) {
+  const { childProcess } = processRef;
+  if (childProcess.exitCode !== null || childProcess.signalCode !== null) {
+    return;
+  }
+  if (childProcess.pid !== undefined) {
+    await killWindowsProcessTree(childProcess.pid);
+  }
+  await Promise.race([
+    waitForProcessExit(childProcess).then(() => true),
+    delay(PROCESS_STOP_TIMEOUT_MS).then(() => false),
+  ]);
+}
+
 async function stopManagedProcess(processRef) {
+  if (process.platform === "win32") {
+    await stopWindowsManagedProcess(processRef);
+    return;
+  }
+
   if (processRef.detached) {
     try {
       process.kill(-processRef.childProcess.pid, "SIGINT");
@@ -720,6 +754,7 @@ async function smokeDaemonJoin(tarballPath) {
   }
 }
 
+let smokeFailure;
 try {
   const tarballPath = await packTarball();
   await smokeProviderBridgeBundles(tarballPath);
@@ -729,6 +764,31 @@ try {
   await smokeFullStack(tarballPath, sdkDir);
   await smokeDaemonJoin(tarballPath);
   process.stdout.write("bb-app tarball smoke passed\n");
-} finally {
-  await rm(tempRoot, { force: true, recursive: true });
+} catch (error) {
+  smokeFailure = error;
+}
+
+try {
+  // Retries cover the brief window where Windows still holds a handle on a
+  // just-terminated process's files.
+  await rm(tempRoot, {
+    force: true,
+    maxRetries: 10,
+    recursive: true,
+    retryDelay: 250,
+  });
+} catch (error) {
+  // Never let cleanup replace a real stage failure: an EBUSY rmdir here would
+  // otherwise hide the error that actually broke the smoke. The temp root
+  // lives on an ephemeral runner, so a leftover directory is not itself a
+  // reason to fail the run.
+  process.stderr.write(
+    `warning: could not remove smoke temp root ${tempRoot}: ${
+      error instanceof Error ? error.message : String(error)
+    }\n`,
+  );
+}
+
+if (smokeFailure !== undefined) {
+  throw smokeFailure;
 }

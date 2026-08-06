@@ -155,6 +155,10 @@ async function buildThreadComposerBootstrapResponse(
 function validateFilePath(filePath: string): void {
   if (
     filePath.startsWith("/") ||
+    filePath.startsWith("\\") ||
+    // A drive-letter or drive-relative prefix is absolute on Windows even
+    // though it has no leading separator, so the checks above miss it.
+    /^[A-Za-z]:/u.test(filePath) ||
     filePath.split("/").includes("..") ||
     filePath.split("\\").includes("..")
   ) {

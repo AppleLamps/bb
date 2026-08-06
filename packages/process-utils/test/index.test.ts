@@ -1,6 +1,6 @@
 import { once } from "node:events";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import {
@@ -135,26 +135,32 @@ describe("process utils", () => {
     expect(Buffer.concat(stdoutChunks).toString("utf8")).toBe("closed");
   });
 
+  // resolveContainedPath resolves against the running platform, so build the
+  // expectations with node:path rather than hardcoding POSIX strings — on
+  // Windows "/tmp/root" resolves to a drive-qualified path.
+  const containmentRootPath = resolve("/tmp/root");
+
   it("resolves paths that stay within the configured root", () => {
+    const candidatePath = join(containmentRootPath, "child", "file.txt");
     expect(
       resolveContainedPath({
-        rootPath: "/tmp/root",
-        candidatePath: "/tmp/root/child/file.txt",
+        rootPath: containmentRootPath,
+        candidatePath,
       }),
-    ).toBe("/tmp/root/child/file.txt");
+    ).toBe(candidatePath);
   });
 
   it("rejects root and escaped paths", () => {
     expect(
       resolveContainedPath({
-        rootPath: "/tmp/root",
-        candidatePath: "/tmp/root",
+        rootPath: containmentRootPath,
+        candidatePath: containmentRootPath,
       }),
     ).toBeNull();
     expect(
       resolveContainedPath({
-        rootPath: "/tmp/root",
-        candidatePath: "/tmp/root/../escape",
+        rootPath: containmentRootPath,
+        candidatePath: join(containmentRootPath, "..", "escape"),
       }),
     ).toBeNull();
   });

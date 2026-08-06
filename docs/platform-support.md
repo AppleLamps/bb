@@ -198,5 +198,9 @@ rebuild the native dependency, for example `npm rebuild better-sqlite3`.
   smoke jobs do not run on pull requests and should not be configured as
   required PR checks.
 - Windows smoke is deliberately not a required check yet. It is coverage for
-  native-module and path regressions, not the full Linux matrix; the server,
-  app, and integration suites still assume a POSIX host in places.
+  native-module and path regressions, not the full Linux matrix.
+- The Windows test step runs the platform-agnostic packages only. Not yet
+  covered there: `@bb/host-workspace` (real git worktrees, including a symlink
+  type-change case that needs elevation on Windows), `@bb/local-open-targets`
+  (macOS/Linux launcher discovery), and the server, app, and integration
+  suites, which assume a POSIX host in places.

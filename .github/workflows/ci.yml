@@ -123,10 +123,13 @@ jobs:
       - name: Typecheck
         run: pnpm exec turbo run typecheck --cache-dir=.turbo/cache --output-logs=new-only
 
-      # Platform-agnostic suites only. The server, app, and integration suites
-      # assume a POSIX host in places and are not part of Windows coverage yet.
+      # Platform-agnostic suites only. Deliberately excluded for now:
+      # @bb/host-workspace drives real git worktrees, including a symlink
+      # type-change case that needs elevation on Windows; @bb/local-open-targets
+      # discovers macOS/Linux launchers; and the server, app, and integration
+      # suites assume a POSIX host in places.
       - name: Test platform-agnostic packages
-        run: pnpm exec turbo run test --filter=@bb/domain --filter=@bb/config --filter=@bb/host-daemon-contract --filter=@bb/server-contract --filter=@bb/host-workspace --filter=@bb/local-open-targets --filter=@bb/process-utils --cache-dir=.turbo/cache --output-logs=new-only
+        run: pnpm exec turbo run test --filter=@bb/domain --filter=@bb/config --filter=@bb/host-daemon-contract --filter=@bb/server-contract --filter=@bb/process-utils --cache-dir=.turbo/cache --output-logs=new-only
 
       # Packs the tarball, starts the server + host daemon, and health-checks
       # both over HTTP.

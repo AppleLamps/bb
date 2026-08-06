@@ -7,7 +7,13 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const HTTP_WAIT_TIMEOUT_MS = 60_000;
+// Windows runners are markedly slower than the Linux/macOS ones for this
+// smoke: the same job takes ~17 minutes there against ~3 elsewhere, mostly
+// filesystem and process-start overhead. A cold bb-server bootstrap (migrate,
+// install builtin plugins into a fresh data dir) can exceed a 60s budget that
+// is comfortable everywhere else, so give Windows more room rather than
+// loosening the wait for every platform.
+const HTTP_WAIT_TIMEOUT_MS = process.platform === "win32" ? 180_000 : 60_000;
 const HTTP_WAIT_INTERVAL_MS = 250;
 const PLUGIN_LOAD_TIMEOUT_MS = 60_000;
 const PLUGIN_LOAD_INTERVAL_MS = 1_000;
@@ -182,7 +188,9 @@ async function waitForHttp({ label, processRef, url }) {
     await delay(HTTP_WAIT_INTERVAL_MS);
   }
   throw new Error(
-    `Timed out waiting for ${label} at ${url}\n${formatProcessOutput(processRef.output)}`,
+    `Timed out waiting for ${label} at ${url} after ${HTTP_WAIT_TIMEOUT_MS}ms\n${formatProcessOutput(
+      processRef.output,
+    )}`,
   );
 }
 

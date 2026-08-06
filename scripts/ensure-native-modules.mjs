@@ -5,8 +5,28 @@ import { fileURLToPath } from "node:url";
 
 const defaultRepoRoot = resolve(fileURLToPath(import.meta.url), "../..");
 
+/**
+ * `verify` is source text evaluated in a fresh Node process with
+ * `requireModule` in scope. It must exercise the addon's native binding, not
+ * just its JavaScript wrapper, so a broken `.node` cannot pass.
+ */
 export const nativeModules = [
-  { name: "better-sqlite3", resolveFrom: "packages/db/package.json" },
+  {
+    name: "better-sqlite3",
+    resolveFrom: "packages/db/package.json",
+    verify: `const Database = requireModule("better-sqlite3");
+const db = new Database(":memory:");
+db.close();`,
+  },
+  {
+    name: "@parcel/watcher",
+    resolveFrom: "packages/host-watcher/package.json",
+    verify: `const watcher = requireModule("@parcel/watcher");
+// getEventsSince crosses into the native binding without creating a
+// subscription, so it cannot leave a watcher behind.
+await watcher.getEventsSince(process.cwd(), require("node:os").tmpdir() +
+  "/bb-native-check-missing-snapshot").catch(() => {});`,
+  },
 ];
 
 function formatThrownValue(err) {
@@ -41,13 +61,10 @@ function formatChildProcessFailure(err) {
 }
 
 export function verifyNativeModule(name, requireModule) {
-  const module = requireModule(name);
-  if (name !== "better-sqlite3") {
-    return;
-  }
-
-  const db = new module(":memory:");
-  db.close();
+  // Requiring the package loads its native binding, which is where an ABI or
+  // platform mismatch surfaces. Deeper per-module exercise happens in the
+  // fresh-process check below, where a poisoned dlopen cache cannot hide it.
+  requireModule(name);
 }
 
 function shouldRebuildNativeModule(errorMessage) {
@@ -69,7 +86,7 @@ function getRepairableNativeModuleError(name, requireModule) {
   }
 }
 
-function getRepairedNativeModuleError(name, pkgJsonPath) {
+function getRepairedNativeModuleError(name, pkgJsonPath, verifySource) {
   try {
     // A failed dlopen remains cached for the life of the process. Verify a
     // replacement binary in a fresh process so the old handle cannot poison it.
@@ -80,9 +97,8 @@ function getRepairedNativeModuleError(name, pkgJsonPath) {
         "--eval",
         `import { createRequire } from "node:module";
 const requireModule = createRequire(${JSON.stringify(pkgJsonPath)});
-const NativeModule = requireModule(${JSON.stringify(name)});
-const instance = new NativeModule(":memory:");
-instance.close();`,
+const require = requireModule;
+${verifySource}`,
       ],
       { stdio: ["ignore", "pipe", "pipe"] },
     );
@@ -103,7 +119,7 @@ export function ensureNativeModules({
     getRepairedNativeModuleError,
   log = console.log,
 } = {}) {
-  for (const { name, resolveFrom } of modules) {
+  for (const { name, resolveFrom, verify } of modules) {
     const requireModule = createRequireImpl(resolve(repoRoot, resolveFrom));
     try {
       verifyNativeModule(name, requireModule);
@@ -140,6 +156,7 @@ export function ensureNativeModules({
       const prebuildVerifyError = verifyRepairedNativeModuleImpl(
         name,
         pkgJsonPath,
+        verify,
       );
       if (prebuildVerifyError === null) {
         if (!prebuildInstalled) {
@@ -179,6 +196,7 @@ export function ensureNativeModules({
       const rebuildVerifyError = verifyRepairedNativeModuleImpl(
         name,
         pkgJsonPath,
+        verify,
       );
       if (rebuildVerifyError !== null) {
         throw new Error(

@@ -1,7 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
-  DEFAULT_ENV_SETUP_SCRIPT_NAME,
+  envSetupScriptNamesForPlatform,
+  WINDOWS_ENV_SETUP_SCRIPT_NAME,
   WORKTREE_INCLUDE_FILE_NAME,
   createTerminalOutputLineReader,
   readTerminalOutputLines,
@@ -188,25 +189,68 @@ async function ensureWorkspaceParentDirectory(
 
 async function resolveSetupScriptPath(
   workspacePath: string,
+  platform: NodeJS.Platform = process.platform,
 ): Promise<string | null> {
-  const scriptPath = path.join(workspacePath, DEFAULT_ENV_SETUP_SCRIPT_NAME);
-  return (await pathExists(scriptPath)) ? scriptPath : null;
+  for (const scriptName of envSetupScriptNamesForPlatform(platform)) {
+    const scriptPath = path.join(workspacePath, scriptName);
+    if (await pathExists(scriptPath)) {
+      return scriptPath;
+    }
+  }
+  return null;
+}
+
+/**
+ * The host that runs a setup script is not always the host that resolved its
+ * path, so `path.basename` (which honors only the local separator) would miss
+ * the file name of a Windows path read on POSIX.
+ */
+function setupScriptFileName(scriptPath: string): string {
+  return scriptPath.split(/[\\/]/u).filter(Boolean).at(-1) ?? scriptPath;
 }
 
 export function buildSetupScriptCommand(
   args: BuildSetupScriptCommandArgs,
 ): SetupScriptCommand {
+  const scriptName = setupScriptFileName(args.scriptPath);
+
+  if (scriptName === WINDOWS_ENV_SETUP_SCRIPT_NAME) {
+    if (args.platform !== "win32") {
+      throw new WorkspaceError(
+        "setup_script_failed",
+        `PowerShell setup scripts are only supported on Windows: ${scriptName}`,
+      );
+    }
+    // -File keeps the script path a path rather than an expression, so spaces
+    // and `$` in the workspace path cannot turn into PowerShell syntax.
+    return {
+      command: "powershell.exe",
+      args: [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        args.scriptPath,
+      ],
+      text: `powershell -File ${scriptName}`,
+    };
+  }
+
   if (args.platform === "win32") {
-    throw new WorkspaceError(
-      "setup_script_failed",
-      `POSIX shell setup scripts are not supported on Windows: ${DEFAULT_ENV_SETUP_SCRIPT_NAME}`,
-    );
+    // `env` is not a Windows executable; call the bash that Git for Windows
+    // puts on PATH directly.
+    return {
+      command: "bash",
+      args: [args.scriptPath],
+      text: `bash ${scriptName}`,
+    };
   }
 
   return {
     command: "env",
     args: ["bash", args.scriptPath],
-    text: `env bash ${DEFAULT_ENV_SETUP_SCRIPT_NAME}`,
+    text: `env bash ${scriptName}`,
   };
 }
 
@@ -533,11 +577,12 @@ export async function runSetupScript(
     platform: process.platform,
     scriptPath,
   });
+  const scriptName = setupScriptFileName(scriptPath);
   const startedAt = Date.now();
   emitStep({
     onProgress: args.onProgress,
     key: "setup-started",
-    text: "Running .bb-env-setup.sh",
+    text: `Running ${scriptName}`,
     status: "started",
     startedAt,
   });
@@ -622,7 +667,7 @@ export async function runSetupScript(
       emitStep({
         onProgress: args.onProgress,
         key: "setup-cancelled",
-        text: ".bb-env-setup.sh cancelled",
+        text: `${scriptName} cancelled`,
         status: "failed",
         startedAt,
         metadata: { durationMs },
@@ -634,7 +679,7 @@ export async function runSetupScript(
       emitStep({
         onProgress: args.onProgress,
         key: "setup-failed",
-        text: ".bb-env-setup.sh failed",
+        text: `${scriptName} failed`,
         status: "failed",
         startedAt,
         metadata: { durationMs },
@@ -649,7 +694,7 @@ export async function runSetupScript(
       emitStep({
         onProgress: args.onProgress,
         key: "setup-failed",
-        text: ".bb-env-setup.sh failed",
+        text: `${scriptName} failed`,
         status: "failed",
         startedAt,
         metadata: { durationMs },
@@ -664,7 +709,7 @@ export async function runSetupScript(
       emitStep({
         onProgress: args.onProgress,
         key: "setup-failed",
-        text: ".bb-env-setup.sh failed",
+        text: `${scriptName} failed`,
         status: "failed",
         startedAt,
         metadata: { durationMs },
@@ -678,7 +723,7 @@ export async function runSetupScript(
     emitStep({
       onProgress: args.onProgress,
       key: "setup-completed",
-      text: ".bb-env-setup.sh finished",
+      text: `${scriptName} finished`,
       status: "completed",
       startedAt,
       metadata: { durationMs },

@@ -1042,7 +1042,7 @@ describe("host-daemon command schemas", () => {
   // the prompt. The fix lives in the daemon's Claude bridge, so the bump is
   // what moves an enrolled machine onto it.
   it("uses protocol version 75 for grantable sandbox network prompts", () => {
-    expect(HOST_DAEMON_PROTOCOL_VERSION).toBe(75);
+    expect(HOST_DAEMON_PROTOCOL_VERSION).toBe(76);
   });
 
   it("binds Plan cancellation to a required turn id and typed result", () => {

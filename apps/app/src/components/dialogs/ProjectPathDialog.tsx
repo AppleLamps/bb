@@ -142,6 +142,12 @@ function getPlatformCopy(
       placeholder,
     };
   }
+  if (platform === "windows") {
+    return {
+      description: `Enter an absolute Windows path${hostSuffix} to the project folder, such as C:\\Users\\me\\repo.`,
+      placeholder: "C:\\path\\to\\project",
+    };
+  }
   return {
     description: `Enter an absolute path${hostSuffix} to the project folder.`,
     placeholder,

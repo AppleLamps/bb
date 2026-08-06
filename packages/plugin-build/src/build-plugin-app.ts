@@ -8,7 +8,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { derivePluginId } from "@bb/domain";
 import type { Plugin } from "esbuild";
 import {
@@ -323,7 +323,7 @@ async function readPluginAppConfig(rootDir: string): Promise<PluginAppConfig> {
     throw new Error(`manifest bb.app must be relative, got "${app}"`);
   }
   const appEntry = resolve(rootDir, app);
-  if (appEntry !== rootDir && !appEntry.startsWith(rootDir + "/")) {
+  if (appEntry !== rootDir && !appEntry.startsWith(rootDir + sep)) {
     throw new Error(`manifest bb.app escapes the plugin directory: "${app}"`);
   }
   try {

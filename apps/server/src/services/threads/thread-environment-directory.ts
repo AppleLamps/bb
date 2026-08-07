@@ -7,7 +7,12 @@ import {
   getThread,
   updateThread,
 } from "@bb/db";
-import { turnScope } from "@bb/domain";
+import {
+  isAbsolutePlatformPath,
+  isFilesystemRootPath,
+  normalizeAbsolutePlatformPath,
+  turnScope,
+} from "@bb/domain";
 import type {
   DynamicTool,
   Environment,
@@ -81,18 +86,14 @@ function toolCallSuccess(text: string): ToolCallResponse {
 }
 
 function normalizeDirectoryPath(path: string): string {
-  const trimmed = path.trim();
-  if (trimmed === "/") {
-    return trimmed;
-  }
-  return trimmed.replace(/\/+$/u, "");
+  return normalizeAbsolutePlatformPath(path);
 }
 
 function validateDirectoryPath(path: string): string | null {
-  if (!path.startsWith("/")) {
+  if (!isAbsolutePlatformPath(path)) {
     return "Path must be an absolute path on the current host.";
   }
-  if (path === "/") {
+  if (isFilesystemRootPath(path)) {
     return "Path must name a project directory, not the filesystem root.";
   }
   if (path.includes("\0")) {

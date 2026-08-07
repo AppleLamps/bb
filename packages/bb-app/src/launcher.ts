@@ -23,6 +23,7 @@ import {
   readBbAppRuntimeFile,
 } from "@bb/config/app-runtime-file";
 import { stopVerifiedProcess } from "@bb/config/verified-process-stop";
+import { spawnPortableProcess } from "@bb/process-utils";
 import {
   APP_SURFACE_ENV_NAME,
   APP_SURFACE_WEB,
@@ -2344,7 +2345,12 @@ async function runBundledCliCommand(
   // trampolines match the running host daemon (dev workspace or this install).
   const bbCliOverride = trimToUndefined(args.env.BB_CLI);
   const cliPath = bbCliOverride ?? join(args.context.daemonBundleDir, "bb");
-  const childProcess = spawn(cliPath, args.args, {
+  // The bundled CLI is an extensionless `#!/usr/bin/env node` script. Windows
+  // has no shebang support, so a direct spawn fails with ENOENT; cross-spawn
+  // reads the shebang and re-targets the launch at node.
+  const childProcess = spawnPortableProcess({
+    command: cliPath,
+    args: args.args,
     cwd: process.cwd(),
     env: createCliEnv({ context: args.context, env: args.env }),
     stdio: "inherit",

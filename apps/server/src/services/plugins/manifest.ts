@@ -1,5 +1,5 @@
 import { lstat, readdir, readFile, realpath, stat } from "node:fs/promises";
-import { isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, resolve, sep } from "node:path";
 import semver from "semver";
 import {
   derivePluginId,
@@ -68,7 +68,7 @@ function resolveEntry(rootDir: string, entry: string, label: string): string {
     throw new Error(`manifest ${label} must be relative, got "${entry}"`);
   }
   const resolved = resolve(rootDir, entry);
-  if (resolved !== rootDir && !resolved.startsWith(rootDir + "/")) {
+  if (resolved !== rootDir && !resolved.startsWith(rootDir + sep)) {
     throw new Error(
       `manifest ${label} escapes the plugin directory: "${entry}"`,
     );
@@ -200,7 +200,7 @@ export async function readPluginManifest(
       realpath(rootDir),
       realpath(assetPath),
     ]);
-    if (realAsset !== realRoot && !realAsset.startsWith(realRoot + "/")) {
+    if (realAsset !== realRoot && !realAsset.startsWith(realRoot + sep)) {
       throw new Error(
         `manifest ${label} escapes the plugin directory through a symlink`,
       );

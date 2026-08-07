@@ -511,13 +511,46 @@ describe("workspace provisioning", () => {
     });
   });
 
-  it("rejects POSIX shell setup scripts on Windows", () => {
-    expect(() =>
+  it("runs the PowerShell setup hook on Windows", () => {
+    expect(
+      buildSetupScriptCommand({
+        platform: "win32",
+        scriptPath: "C:\\repo\\.bb-env-setup.ps1",
+      }),
+    ).toMatchObject({
+      command: "powershell.exe",
+      args: [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "C:\\repo\\.bb-env-setup.ps1",
+      ],
+      text: "powershell -File .bb-env-setup.ps1",
+    });
+  });
+
+  it("falls back to bash for a POSIX setup hook on Windows", () => {
+    expect(
       buildSetupScriptCommand({
         platform: "win32",
         scriptPath: "C:\\repo\\.bb-env-setup.sh",
       }),
-    ).toThrow(/not supported on Windows/u);
+    ).toMatchObject({
+      command: "bash",
+      args: ["C:\\repo\\.bb-env-setup.sh"],
+      text: "bash .bb-env-setup.sh",
+    });
+  });
+
+  it("rejects PowerShell setup scripts off Windows", () => {
+    expect(() =>
+      buildSetupScriptCommand({
+        platform: "linux",
+        scriptPath: "/tmp/.bb-env-setup.ps1",
+      }),
+    ).toThrow(/only supported on Windows/u);
   });
 
   it("returns a no-op when the setup script is missing", async () => {

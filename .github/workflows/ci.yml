@@ -98,6 +98,44 @@ jobs:
       - name: Smoke bb-app tarball
         run: pnpm exec turbo run smoke:tarball --filter=bb-app --cache-dir=.turbo/cache --output-logs=new-only
 
+  # Windows starts as smoke-only coverage: enough to catch a native-module or
+  # path regression that breaks `npx bb-app` on win32, without making the full
+  # Linux matrix a required Windows check.
+  windows-smoke:
+    name: Windows Smoke (windows-latest, Node 22.x)
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+          cache-prefix: windows-smoke
+
+      - name: Verify native modules load
+        run: node scripts/ensure-native-modules.mjs
+
+      - name: Typecheck
+        run: pnpm exec turbo run typecheck --cache-dir=.turbo/cache --output-logs=new-only
+
+      # Platform-agnostic suites only. Deliberately excluded for now:
+      # @bb/host-workspace drives real git worktrees, including a symlink
+      # type-change case that needs elevation on Windows; @bb/local-open-targets
+      # discovers macOS/Linux launchers; and the server, app, and integration
+      # suites assume a POSIX host in places.
+      - name: Test platform-agnostic packages
+        run: pnpm exec turbo run test --filter=@bb/domain --filter=@bb/config --filter=@bb/host-daemon-contract --filter=@bb/server-contract --filter=@bb/process-utils --cache-dir=.turbo/cache --output-logs=new-only
+
+      # Packs the tarball, starts the server + host daemon, and health-checks
+      # both over HTTP.
+      - name: Smoke bb-app tarball
+        run: pnpm exec turbo run smoke:tarball --filter=bb-app --cache-dir=.turbo/cache --output-logs=new-only
+
   node-compat-smoke:
     name: Node Compatibility Smoke (${{ matrix.os }}, Node ${{ matrix.node-version }})
     if: ${{ github.event_name != 'pull_request' }}

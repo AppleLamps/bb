@@ -47,6 +47,7 @@ const PERMISSION_LIMIT_DESCRIPTION =
 const PLATFORM_LABELS: Record<HostPlatform, string | null> = {
   darwin: "macOS",
   linux: "Linux",
+  windows: "Windows",
   wsl: "WSL",
   unknown: null,
 };

@@ -387,6 +387,9 @@ export function registerFileRoutes(app: Hono, deps: AppDeps): void {
     const segments = rawPath.split("/");
     if (
       rawPath.startsWith("/") ||
+      // A drive-letter or drive-relative prefix is absolute on Windows even
+      // though it has no leading separator, so the check above misses it.
+      /^[A-Za-z]:/u.test(rawPath) ||
       segments.some(
         (segment) => segment === "" || segment === "." || segment === "..",
       )

@@ -1187,7 +1187,7 @@ describe("TerminalManager", () => {
     ]);
   });
 
-  it("rejects native Windows opens", async () => {
+  it("opens native Windows terminals with PowerShell command flags", async () => {
     const harness = createHarness();
     const manager = new TerminalManager({
       logger: {
@@ -1196,8 +1196,9 @@ describe("TerminalManager", () => {
         info: vi.fn(),
         warn: vi.fn(),
       },
-      platform: "win32",
       ptyAdapter: harness.adapter,
+      resolveShell: async () =>
+        "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
       runtimeManager: harness.runtimeManager,
       sendMessage: (message) => {
         harness.messages.push(message);
@@ -1214,25 +1215,19 @@ describe("TerminalManager", () => {
         kind: "workspace",
         environmentId: "env-1",
         workspaceContext: {
-          workspacePath: "/tmp/terminal-workspace",
+          workspacePath: "C:\\repos\\bb",
           workspaceProvisionType: "unmanaged",
         },
       },
       cols: 100,
       rows: 30,
-      start: DEFAULT_TERMINAL_START,
+      start: { mode: "command", command: "pnpm dev" },
     });
 
-    expect(harness.adapter.spawned).toHaveLength(0);
-    expect(harness.messages).toEqual([
-      {
-        type: "terminal.error",
-        requestId: "open-1",
-        terminalId: "term-1",
-        code: "unsupported_platform",
-        message: "Native Windows terminals are not supported",
-      },
-    ]);
+    expect(harness.adapter.spawned[0]?.args).toMatchObject({
+      args: ["-NoLogo", "-NoProfile", "-Command", "pnpm dev"],
+      file: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    });
   });
 
   it("runs commands in one persistent shell from the workspace cwd", async () => {

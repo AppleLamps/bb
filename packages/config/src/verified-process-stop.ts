@@ -85,6 +85,51 @@ async function readPsField(pid: number, field: string): Promise<string | null> {
   }
 }
 
+/**
+ * Windows has no `ps`. `Get-CimInstance Win32_Process` is the supported
+ * replacement — `wmic.exe` is deprecated and absent on current Windows 11
+ * builds, so it is not a fallback worth keeping.
+ */
+async function readWindowsProcessProperty(
+  pid: number,
+  property: "CommandLine" | "CreationDate",
+): Promise<string | null> {
+  try {
+    const result = await execFileAsync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; ` +
+          `if ($null -ne $p) { $p.${property} }`,
+      ],
+      { windowsHide: true },
+    );
+    const value = result.stdout.trim();
+    return value.length > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+async function readWindowsElapsedSeconds(pid: number): Promise<number | null> {
+  // PowerShell renders CIM DateTime with the host locale, so parse it as a
+  // date rather than matching a fixed format.
+  const rawCreationDate = await readWindowsProcessProperty(
+    pid,
+    "CreationDate",
+  );
+  if (rawCreationDate === null) {
+    return null;
+  }
+  const createdAt = Date.parse(rawCreationDate);
+  if (Number.isNaN(createdAt)) {
+    return null;
+  }
+  return Math.max(0, Math.round((Date.now() - createdAt) / 1_000));
+}
+
 /** Parse the `ps -o etime=` format `[[dd-]hh:]mm:ss` into seconds. */
 export function parseElapsedSeconds(rawElapsed: string): number | null {
   const match = rawElapsed
@@ -113,14 +158,26 @@ async function waitForProcessExit(
   return !isProcessRunning(args.pid);
 }
 
-export function createNodeVerifiedProcessOps(): VerifiedProcessOps {
+export function createNodeVerifiedProcessOps(
+  platform: NodeJS.Platform = process.platform,
+): VerifiedProcessOps {
+  const isWindows = platform === "win32";
   return {
     isRunning: (pid) => isProcessRunning(pid),
     kill(pid, signal) {
+      // Windows has no signals; Node maps every signal name to an
+      // unconditional terminate, so the escalation to SIGKILL is a no-op there
+      // rather than a second, harder kill.
       process.kill(pid, signal);
     },
-    readCommand: (pid) => readPsField(pid, "command="),
+    readCommand: (pid) =>
+      isWindows
+        ? readWindowsProcessProperty(pid, "CommandLine")
+        : readPsField(pid, "command="),
     async readElapsedSeconds(pid) {
+      if (isWindows) {
+        return readWindowsElapsedSeconds(pid);
+      }
       const rawElapsed = await readPsField(pid, "etime=");
       return rawElapsed === null ? null : parseElapsedSeconds(rawElapsed);
     },

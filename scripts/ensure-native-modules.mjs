@@ -5,9 +5,45 @@ import { fileURLToPath } from "node:url";
 
 const defaultRepoRoot = resolve(fileURLToPath(import.meta.url), "../..");
 
+/**
+ * Each add-on declares how to exercise its native binding, in two forms:
+ * `verify` for the in-process check and `verifySource` for the fresh-process
+ * recheck (where `requireModule` is in scope). They must stay equivalent.
+ */
 export const nativeModules = [
-  { name: "better-sqlite3", resolveFrom: "packages/db/package.json" },
+  {
+    name: "better-sqlite3",
+    resolveFrom: "packages/db/package.json",
+    // better-sqlite3 loads its binding lazily inside the constructor, so
+    // requiring the wrapper alone cannot surface an ABI mismatch.
+    verify: (requireModule) => {
+      const Database = requireModule("better-sqlite3");
+      const db = new Database(":memory:");
+      db.close();
+    },
+    verifySource: `const Database = requireModule("better-sqlite3");
+const db = new Database(":memory:");
+db.close();`,
+  },
+  {
+    name: "@parcel/watcher",
+    resolveFrom: "packages/host-watcher/package.json",
+    // @parcel/watcher loads its binding at module scope via node-gyp-build, so
+    // the require itself is what fails on an ABI or platform mismatch.
+    verify: (requireModule) => {
+      requireModule("@parcel/watcher");
+    },
+    verifySource: `requireModule("@parcel/watcher");`,
+  },
 ];
+
+function getNativeModuleEntry(name) {
+  const entry = nativeModules.find((module) => module.name === name);
+  if (entry === undefined) {
+    throw new Error(`Unknown native module: ${name}`);
+  }
+  return entry;
+}
 
 function formatThrownValue(err) {
   return err instanceof Error ? err.message : String(err);
@@ -40,14 +76,8 @@ function formatChildProcessFailure(err) {
   return details.join("\n");
 }
 
-export function verifyNativeModule(name, requireModule) {
-  const module = requireModule(name);
-  if (name !== "better-sqlite3") {
-    return;
-  }
-
-  const db = new module(":memory:");
-  db.close();
+export function verifyNativeModule(name, requireModule, verify) {
+  (verify ?? getNativeModuleEntry(name).verify)(requireModule);
 }
 
 function shouldRebuildNativeModule(errorMessage) {
@@ -69,7 +99,8 @@ function getRepairableNativeModuleError(name, requireModule) {
   }
 }
 
-function getRepairedNativeModuleError(name, pkgJsonPath) {
+function getRepairedNativeModuleError(name, pkgJsonPath, verifySource) {
+  const source = verifySource ?? getNativeModuleEntry(name).verifySource;
   try {
     // A failed dlopen remains cached for the life of the process. Verify a
     // replacement binary in a fresh process so the old handle cannot poison it.
@@ -80,9 +111,8 @@ function getRepairedNativeModuleError(name, pkgJsonPath) {
         "--eval",
         `import { createRequire } from "node:module";
 const requireModule = createRequire(${JSON.stringify(pkgJsonPath)});
-const NativeModule = requireModule(${JSON.stringify(name)});
-const instance = new NativeModule(":memory:");
-instance.close();`,
+const require = requireModule;
+${source}`,
       ],
       { stdio: ["ignore", "pipe", "pipe"] },
     );
@@ -103,10 +133,10 @@ export function ensureNativeModules({
     getRepairedNativeModuleError,
   log = console.log,
 } = {}) {
-  for (const { name, resolveFrom } of modules) {
+  for (const { name, resolveFrom, verify, verifySource } of modules) {
     const requireModule = createRequireImpl(resolve(repoRoot, resolveFrom));
     try {
-      verifyNativeModule(name, requireModule);
+      verifyNativeModule(name, requireModule, verify);
     } catch (err) {
       const message = formatThrownValue(err);
       if (!shouldRebuildNativeModule(message)) throw err;
@@ -140,6 +170,7 @@ export function ensureNativeModules({
       const prebuildVerifyError = verifyRepairedNativeModuleImpl(
         name,
         pkgJsonPath,
+        verifySource,
       );
       if (prebuildVerifyError === null) {
         if (!prebuildInstalled) {
@@ -179,6 +210,7 @@ export function ensureNativeModules({
       const rebuildVerifyError = verifyRepairedNativeModuleImpl(
         name,
         pkgJsonPath,
+        verifySource,
       );
       if (rebuildVerifyError !== null) {
         throw new Error(

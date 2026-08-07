@@ -71,7 +71,6 @@ type TerminalAttachMessage = Extract<
 export interface TerminalManagerOptions {
   dataDir?: string;
   logger: HostDaemonLogger;
-  platform?: NodeJS.Platform;
   ptyAdapter?: TerminalPtyAdapter;
   resolveShell?: ResolveTerminalShell;
   runtimeManager: RuntimeManager;
@@ -164,7 +163,10 @@ interface TerminalOperationCompletion {
 
 export const nodePtyAdapter: TerminalPtyAdapter = {
   spawn(args) {
-    ensureNodePtySpawnHelperExecutable(args.logger);
+    if (process.platform !== "win32") {
+      // Windows drives node-pty through ConPTY, which has no spawn-helper.
+      ensureNodePtySpawnHelperExecutable(args.logger);
+    }
     const pty = spawnPty(args.file, args.args, {
       cols: args.cols,
       cwd: args.cwd,
@@ -289,7 +291,32 @@ function isNonEmptyString(value: string | undefined): value is string {
   return value !== undefined && value.length > 0;
 }
 
+function windowsTerminalShellCandidates(): string[] {
+  const systemRoot = process.env.SystemRoot ?? "C:\\Windows";
+  return [
+    process.env.BB_TERMINAL_SHELL,
+    process.env.COMSPEC,
+    path.join(
+      systemRoot,
+      "System32",
+      "WindowsPowerShell",
+      "v1.0",
+      "powershell.exe",
+    ),
+    path.join(systemRoot, "System32", "cmd.exe"),
+  ].filter(isNonEmptyString);
+}
+
 export async function resolveDefaultTerminalShell(): Promise<string> {
+  if (process.platform === "win32") {
+    for (const candidate of windowsTerminalShellCandidates()) {
+      if (await pathIsExecutable(candidate)) {
+        return candidate;
+      }
+    }
+    return "cmd.exe";
+  }
+
   const candidates = [
     process.env.SHELL,
     "/bin/zsh",
@@ -332,12 +359,34 @@ function terminalTitleFromCommand(command: string): string {
   return `${normalized.slice(0, 77)}...`;
 }
 
-function terminalSpawnArgsForStart(message: TerminalOpenMessage): string[] {
+/**
+ * Flags that make `shell` run a single command and exit. `-lc` is POSIX shell
+ * syntax; cmd.exe and PowerShell each need their own, so the shell decides.
+ */
+function shellCommandArgs(shell: string, command: string): string[] {
+  // Split on both separators: a Windows shell path can be inspected from a
+  // POSIX host (tests, and a server reasoning about a remote machine), where
+  // `path.basename` would not treat `\` as a separator.
+  const shellName = (shell.split(/[\\/]/u).filter(Boolean).at(-1) ?? shell)
+    .toLowerCase();
+  if (shellName === "cmd.exe" || shellName === "cmd") {
+    return ["/d", "/s", "/c", command];
+  }
+  if (shellName === "powershell.exe" || shellName === "pwsh.exe") {
+    return ["-NoLogo", "-NoProfile", "-Command", command];
+  }
+  return ["-lc", command];
+}
+
+function terminalSpawnArgsForStart(
+  message: TerminalOpenMessage,
+  shell: string,
+): string[] {
   switch (message.start.mode) {
     case "shell":
       return [];
     case "command":
-      return ["-lc", message.start.command];
+      return shellCommandArgs(shell, message.start.command);
   }
 }
 
@@ -384,7 +433,6 @@ function createTerminalOperationCompletion(): TerminalOperationCompletion {
 }
 
 export class TerminalManager {
-  private readonly platform: NodeJS.Platform;
   private readonly ptyAdapter: TerminalPtyAdapter;
   private readonly resolveShell: ResolveTerminalShell;
   private readonly scrollbackMaxBytes: number;
@@ -397,7 +445,6 @@ export class TerminalManager {
   private readonly sessions = new Map<string, TerminalSession>();
 
   constructor(private readonly options: TerminalManagerOptions) {
-    this.platform = options.platform ?? process.platform;
     this.ptyAdapter = options.ptyAdapter ?? nodePtyAdapter;
     this.resolveShell = options.resolveShell ?? resolveDefaultTerminalShell;
     this.scrollbackMaxBytes =
@@ -499,16 +546,6 @@ export class TerminalManager {
       return;
     }
 
-    if (this.platform === "win32") {
-      this.sendTerminalError({
-        code: "unsupported_platform",
-        message: "Native Windows terminals are not supported",
-        requestId: message.requestId,
-        terminalId: message.terminalId,
-      });
-      return;
-    }
-
     const openingEnvironmentId = terminalEnvironmentIdFromOpenMessage(message);
     this.openingTerminalEnvironmentIds.set(
       message.terminalId,
@@ -518,7 +555,7 @@ export class TerminalManager {
       const target = await this.resolveTerminalOpenTarget(message);
       const shell = await this.resolveShell();
       const pty = this.ptyAdapter.spawn({
-        args: terminalSpawnArgsForStart(message),
+        args: terminalSpawnArgsForStart(message, shell),
         cols: message.cols,
         cwd: target.cwd,
         env: buildTerminalEnv({

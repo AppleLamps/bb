@@ -1,11 +1,19 @@
-import { spawn } from "node:child_process";
+// cross-spawn, not node:child_process.spawn: on Windows `npm` and `npx` are
+// .cmd shims, which Node refuses to spawn without a shell.
+import spawn from "cross-spawn";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const HTTP_WAIT_TIMEOUT_MS = 60_000;
+// Windows runners are markedly slower than the Linux/macOS ones for this
+// smoke: the same job takes ~17 minutes there against ~3 elsewhere, mostly
+// filesystem and process-start overhead. A cold bb-server bootstrap (migrate,
+// install builtin plugins into a fresh data dir) can exceed a 60s budget that
+// is comfortable everywhere else, so give Windows more room rather than
+// loosening the wait for every platform.
+const HTTP_WAIT_TIMEOUT_MS = process.platform === "win32" ? 180_000 : 60_000;
 const HTTP_WAIT_INTERVAL_MS = 250;
 const PLUGIN_LOAD_TIMEOUT_MS = 60_000;
 const PLUGIN_LOAD_INTERVAL_MS = 1_000;
@@ -180,11 +188,47 @@ async function waitForHttp({ label, processRef, url }) {
     await delay(HTTP_WAIT_INTERVAL_MS);
   }
   throw new Error(
-    `Timed out waiting for ${label} at ${url}\n${formatProcessOutput(processRef.output)}`,
+    `Timed out waiting for ${label} at ${url} after ${HTTP_WAIT_TIMEOUT_MS}ms\n${formatProcessOutput(
+      processRef.output,
+    )}`,
   );
 }
 
+function killWindowsProcessTree(pid) {
+  return new Promise((resolvePromise) => {
+    const killer = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], {
+      stdio: "ignore",
+    });
+    killer.on("error", () => resolvePromise());
+    killer.on("exit", () => resolvePromise());
+  });
+}
+
+/**
+ * Windows has no process groups, so killing the npx wrapper leaves the real
+ * bb-app process running with the data dir still open — which then turns the
+ * temp-root cleanup into EBUSY. taskkill /T ends the whole tree.
+ */
+async function stopWindowsManagedProcess(processRef) {
+  const { childProcess } = processRef;
+  if (childProcess.exitCode !== null || childProcess.signalCode !== null) {
+    return;
+  }
+  if (childProcess.pid !== undefined) {
+    await killWindowsProcessTree(childProcess.pid);
+  }
+  await Promise.race([
+    waitForProcessExit(childProcess).then(() => true),
+    delay(PROCESS_STOP_TIMEOUT_MS).then(() => false),
+  ]);
+}
+
 async function stopManagedProcess(processRef) {
+  if (process.platform === "win32") {
+    await stopWindowsManagedProcess(processRef);
+    return;
+  }
+
   if (processRef.detached) {
     try {
       process.kill(-processRef.childProcess.pid, "SIGINT");
@@ -249,6 +293,8 @@ async function packTarball() {
 async function extractTarball(tarballPath) {
   const extractDir = join(tempRoot, "extracted-package");
   await mkdir(extractDir, { recursive: true });
+  // Windows 10+ ships bsdtar as tar.exe, so this one command covers every
+  // supported host.
   await runCommand({
     args: ["-xzf", tarballPath, "-C", extractDir],
     command: "tar",
@@ -716,6 +762,7 @@ async function smokeDaemonJoin(tarballPath) {
   }
 }
 
+let smokeFailure;
 try {
   const tarballPath = await packTarball();
   await smokeProviderBridgeBundles(tarballPath);
@@ -725,6 +772,31 @@ try {
   await smokeFullStack(tarballPath, sdkDir);
   await smokeDaemonJoin(tarballPath);
   process.stdout.write("bb-app tarball smoke passed\n");
-} finally {
-  await rm(tempRoot, { force: true, recursive: true });
+} catch (error) {
+  smokeFailure = error;
+}
+
+try {
+  // Retries cover the brief window where Windows still holds a handle on a
+  // just-terminated process's files.
+  await rm(tempRoot, {
+    force: true,
+    maxRetries: 10,
+    recursive: true,
+    retryDelay: 250,
+  });
+} catch (error) {
+  // Never let cleanup replace a real stage failure: an EBUSY rmdir here would
+  // otherwise hide the error that actually broke the smoke. The temp root
+  // lives on an ephemeral runner, so a leftover directory is not itself a
+  // reason to fail the run.
+  process.stderr.write(
+    `warning: could not remove smoke temp root ${tempRoot}: ${
+      error instanceof Error ? error.message : String(error)
+    }\n`,
+  );
+}
+
+if (smokeFailure !== undefined) {
+  throw smokeFailure;
 }

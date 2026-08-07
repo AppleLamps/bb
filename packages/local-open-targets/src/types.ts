@@ -38,6 +38,7 @@ export interface ExecFileResult {
 
 export interface ExecFileOptions {
   env?: NodeJS.ProcessEnv;
+  windowsHide?: boolean;
 }
 
 export type ExecFileHandler = (

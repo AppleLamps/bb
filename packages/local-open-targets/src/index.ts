@@ -484,6 +484,7 @@ async function defaultExecFile(
   options?: ExecFileOptions,
 ): Promise<ExecFileResult> {
   const result = await execFileAsync(file, args, {
+    ...options,
     env: sanitizeInheritedChildProcessEnv({ env: options?.env ?? process.env }),
   });
   return {
@@ -931,6 +932,9 @@ export async function listWorkspaceOpenTargetsWithRuntime(
   runtime: WorkspaceOpenTargetRuntime,
   options: ListWorkspaceOpenTargetsOptions = {},
 ): Promise<WorkspaceOpenTarget[]> {
+  if (runtime.platform === "win32") {
+    return await listPlatformWorkspaceOpenTargets(runtime);
+  }
   if (runtime.platform !== "darwin") {
     if (runtime.platform !== "linux") {
       return [];
@@ -1040,12 +1044,23 @@ function resolveTargetOpenPath(args: ResolveTargetOpenPathArgs): string {
   return args.existingPath.path;
 }
 
+/**
+ * Command that resolves an executable name to an existing path. Windows ships
+ * `where` (the `which` equivalent); POSIX hosts use `which`.
+ */
+function executableProbeCommand(runtime: WorkspaceOpenTargetRuntime): string {
+  return runtime.platform === "win32" ? "where" : "which";
+}
+
 async function isExecutableAvailable(
   executable: string,
   runtime: WorkspaceOpenTargetRuntime,
 ): Promise<boolean> {
   try {
-    await runtime.execFile("which", [executable]);
+    // `windowsHide` keeps the probe from flashing a console window on win32.
+    await runtime.execFile(executableProbeCommand(runtime), [executable], {
+      windowsHide: true,
+    });
     return true;
   } catch {
     return false;
@@ -1805,7 +1820,7 @@ async function resolvePlatformOpenInvocation(
   args: OpenPathInTargetArgs,
   runtime: WorkspaceOpenTargetRuntime,
 ): Promise<ExecFileInvocation> {
-  if (runtime.platform !== "linux") {
+  if (runtime.platform !== "linux" && runtime.platform !== "win32") {
     throw new WorkspaceOpenTargetError({
       code: "unsupported_platform",
       message: "Workspace open targets are not supported on this platform",

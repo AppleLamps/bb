@@ -217,6 +217,6 @@ rebuild the native dependency, for example `npm rebuild better-sqlite3`.
   native-module and path regressions, not the full Linux matrix.
 - The Windows test step runs the platform-agnostic packages only. Not yet
   covered there: `@bb/host-workspace` (real git worktrees, including a symlink
-  type-change case that needs elevation on Windows), `@bb/local-open-targets`
-  (macOS/Linux launcher discovery), and the server, app, and integration
-  suites, which assume a POSIX host in places.
+  type-change case that needs elevation on Windows) and the server, app, and
+  integration suites, which assume a POSIX host in places. `@bb/local-open-targets`
+  runs on Windows and exercises the win32 default-app/file-manager discovery.
